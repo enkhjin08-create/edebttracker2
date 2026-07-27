@@ -15,6 +15,8 @@ import {
   Lock,
   Delete,
   CalendarDays,
+  Settings,
+  Copy,
 } from "lucide-react";
 import { storage, getConfig, setConfig, clearConfig, testConnection } from "./storage.js";
 
