@@ -187,20 +187,6 @@ function StatCard({ label, amount, tone, icon }) {
           {amount}
         </p>
       </div>
-
-      {showSettings && (
-        <SettingsModal
-          firebaseConfig={firebaseConfig}
-          onClose={() => setShowSettings(false)}
-          onDisconnect={() => {
-            clearConfig();
-            setFirebaseConfig(null);
-            setEntries([]);
-            setLoaded(false);
-            setShowSettings(false);
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -1461,6 +1447,20 @@ export default function DebtTracker() {
           defaultDate={modalState.defaultDate}
           onSave={saveEntry}
           onClose={() => setModalState(null)}
+        />
+      )}
+
+      {showSettings && (
+        <SettingsModal
+          firebaseConfig={firebaseConfig}
+          onClose={() => setShowSettings(false)}
+          onDisconnect={() => {
+            clearConfig();
+            setFirebaseConfig(null);
+            setEntries([]);
+            setLoaded(false);
+            setShowSettings(false);
+          }}
         />
       )}
     </div>
