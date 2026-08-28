@@ -861,7 +861,7 @@ function fmtSavings(n) {
 }
 
 function SavingsSection({ onBack }) {
-  const [data, setData] = useState({ goal: 50000000, start: 25000000, entries: [] });
+  const [data, setData] = useState({ goal: 50000000, start: 11000000, entries: [] });
   const [loaded, setLoaded] = useState(false);
   const [saveError, setSaveError] = useState(false);
   const [amount, setAmount] = useState("");
