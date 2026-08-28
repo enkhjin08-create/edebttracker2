@@ -17,6 +17,8 @@ import {
   CalendarDays,
   Settings,
   Copy,
+  PiggyBank,
+  ArrowLeft,
 } from "lucide-react";
 import { storage, getConfig, setConfig, clearConfig, testConnection } from "./storage.js";
 
@@ -732,8 +734,9 @@ service cloud.firestore {
 
 // ---------- PIN lock screen ----------
 const APP_PIN = "0302";
+const SAVINGS_PIN = "1122"; // Хадгаламжийн цэсний тусдаа код — өөрчлөхийг хүсвэл энэ мөрийг засна уу
 
-function PinLock({ onUnlock }) {
+function PinLock({ onUnlock, pin: correctPin = APP_PIN, title = "Санхүүгийн дэвтэр", subtitle }) {
   const [pin, setPin] = useState("");
   const [shake, setShake] = useState(false);
 
@@ -742,7 +745,7 @@ function PinLock({ onUnlock }) {
     const next = pin + d;
     setPin(next);
     if (next.length === 4) {
-      if (next === APP_PIN) {
+      if (next === correctPin) {
         setTimeout(() => onUnlock(), 150);
       } else {
         setShake(true);
@@ -786,10 +789,10 @@ function PinLock({ onUnlock }) {
           className="text-lg font-semibold mb-1"
           style={{ fontFamily: "'Space Grotesk', sans-serif", color: COLORS.ink }}
         >
-          Санхүүгийн дэвтэр
+          {title}
         </h1>
         <p className="text-xs" style={{ color: shake ? COLORS.wine : COLORS.inkSoft }}>
-          {shake ? "Код буруу байна, дахин оролдоорой" : "Нэвтрэх кодоо оруулна уу"}
+          {shake ? "Код буруу байна, дахин оролдоорой" : (subtitle || "Нэвтрэх кодоо оруулна уу")}
         </p>
       </div>
 
@@ -850,6 +853,348 @@ function PinLock({ onUnlock }) {
   );
 }
 
+
+// ---------- Savings section ----------
+function fmtSavings(n) {
+  const num = Number(n) || 0;
+  return Math.round(num).toLocaleString("mn-MN") + "₮";
+}
+
+function SavingsSection({ onBack }) {
+  const [data, setData] = useState({ goal: 50000000, start: 25000000, entries: [] });
+  const [loaded, setLoaded] = useState(false);
+  const [saveError, setSaveError] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+  const [editingGoal, setEditingGoal] = useState(false);
+  const [goalInput, setGoalInput] = useState("");
+  const [startInput, setStartInput] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await storage.get("savings-data");
+        if (!cancelled && res && res.value) {
+          setData(JSON.parse(res.value));
+        }
+      } catch (e) {
+        // no saved data yet
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!loaded) return;
+    (async () => {
+      try {
+        await storage.set("savings-data", JSON.stringify(data));
+        setSaveError(false);
+      } catch (e) {
+        setSaveError(true);
+      }
+    })();
+  }, [data, loaded]);
+
+  function addEntry() {
+    const val = parseFloat(amount);
+    if (!val || val <= 0) {
+      setError("Дүнгээ зөв оруулна уу");
+      return;
+    }
+    setError("");
+    const entry = { id: genId(), amount: val, note: note || "Хуримтлал", date: new Date().toISOString() };
+    setData((d) => ({ ...d, entries: [entry, ...d.entries] }));
+    setAmount("");
+    setNote("");
+  }
+
+  function removeEntry(id) {
+    setData((d) => ({ ...d, entries: d.entries.filter((en) => en.id !== id) }));
+  }
+
+  function saveGoalEdit() {
+    const g = parseFloat(goalInput);
+    const s = parseFloat(startInput);
+    setData((d) => ({
+      ...d,
+      goal: g > 0 ? g : d.goal,
+      start: s >= 0 ? s : d.start,
+    }));
+    setEditingGoal(false);
+  }
+
+  if (!loaded) {
+    return (
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{ background: COLORS.paper, color: COLORS.inkSoft, fontFamily: "'Inter', sans-serif" }}
+      >
+        Уншиж байна...
+      </div>
+    );
+  }
+
+  const totalAdded = data.entries.reduce((s, en) => s + en.amount, 0);
+  const current = data.start + totalAdded;
+  const remaining = Math.max(data.goal - current, 0);
+  const pct = data.goal > 0 ? Math.min((current / data.goal) * 100, 100) : 0;
+
+  const oldestEntry = data.entries[data.entries.length - 1];
+  const daysSinceFirst = oldestEntry
+    ? Math.max(1, Math.ceil((Date.now() - new Date(oldestEntry.date).getTime()) / 86400000))
+    : 0;
+  const avgDaily = daysSinceFirst > 0 ? totalAdded / daysSinceFirst : 0;
+  const daysToGoal = avgDaily > 0 ? Math.ceil(remaining / avgDaily) : null;
+  const projectedDate = daysToGoal ? new Date(Date.now() + daysToGoal * 86400000) : null;
+
+  return (
+    <div style={{ background: COLORS.paper, minHeight: "100vh", fontFamily: "'Inter', sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap');
+        * { box-sizing: border-box; }
+        button:focus-visible, input:focus-visible { outline: 2px solid ${COLORS.ochre}; outline-offset: 1px; }
+      `}</style>
+
+      <div className="max-w-2xl mx-auto px-4 py-6 md:py-10 pb-24">
+        <header className="mb-6 flex items-center gap-3">
+          <button
+            onClick={onBack}
+            aria-label="Буцах"
+            className="rounded-full p-2 shrink-0"
+            style={{ background: COLORS.cream, border: `1px solid ${COLORS.line}`, color: COLORS.inkSoft }}
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <div>
+            <p
+              className="text-xs uppercase mb-1"
+              style={{ fontFamily: "'IBM Plex Mono', monospace", letterSpacing: "0.08em", color: COLORS.inkSoft }}
+            >
+              Хадгаламж
+            </p>
+            <h1
+              className="text-xl md:text-2xl font-semibold"
+              style={{ fontFamily: "'Space Grotesk', sans-serif", color: COLORS.ink }}
+            >
+              Талбайн урьдчилгааны хадгаламж
+            </h1>
+          </div>
+        </header>
+
+        {saveError && (
+          <p className="text-xs mb-4" style={{ color: COLORS.wine }}>
+            Хадгалахад алдаа гарлаа. Сүлжээгээ шалгаад дахин оролдоорой.
+          </p>
+        )}
+
+        <div
+          className="rounded-2xl p-4 mb-4"
+          style={{ background: COLORS.cream, border: `1px solid ${COLORS.line}` }}
+        >
+          <div className="flex items-start justify-between mb-2">
+            <div>
+              <p
+                className="text-2xl font-semibold"
+                style={{ fontFamily: "'Space Grotesk', sans-serif", color: COLORS.forest }}
+              >
+                {fmtSavings(current)}
+              </p>
+              <p className="text-xs mt-0.5" style={{ color: COLORS.inkSoft }}>
+                Зорилго: {fmtSavings(data.goal)}
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setGoalInput(String(data.goal));
+                setStartInput(String(data.start));
+                setEditingGoal(true);
+              }}
+              className="text-xs shrink-0"
+              style={{ color: COLORS.inkSoft, textDecoration: "underline" }}
+            >
+              Засах
+            </button>
+          </div>
+
+          {editingGoal && (
+            <div
+              className="rounded-xl p-3 mb-3 space-y-2"
+              style={{ background: COLORS.paper, border: `1px solid ${COLORS.line}` }}
+            >
+              <div>
+                <label className="text-xs" style={{ color: COLORS.inkSoft }}>Эхлэх дүн (одоо байгаа)</label>
+                <input
+                  type="number"
+                  value={startInput}
+                  onChange={(e) => setStartInput(e.target.value)}
+                  className="w-full rounded-lg px-3 py-2 text-sm mt-1"
+                  style={{ background: COLORS.cream, border: `1px solid ${COLORS.line}`, color: COLORS.ink }}
+                />
+              </div>
+              <div>
+                <label className="text-xs" style={{ color: COLORS.inkSoft }}>Зорилго</label>
+                <input
+                  type="number"
+                  value={goalInput}
+                  onChange={(e) => setGoalInput(e.target.value)}
+                  className="w-full rounded-lg px-3 py-2 text-sm mt-1"
+                  style={{ background: COLORS.cream, border: `1px solid ${COLORS.line}`, color: COLORS.ink }}
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={saveGoalEdit}
+                  className="flex-1 rounded-lg py-2 text-sm font-medium"
+                  style={{ background: COLORS.forest, color: COLORS.cream }}
+                >
+                  Хадгалах
+                </button>
+                <button
+                  onClick={() => setEditingGoal(false)}
+                  className="flex-1 rounded-lg py-2 text-sm"
+                  style={{ background: COLORS.cream, border: `1px solid ${COLORS.line}`, color: COLORS.ink }}
+                >
+                  Болих
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="rounded-full overflow-hidden" style={{ background: COLORS.paperDeep, height: 12 }}>
+            <div
+              style={{
+                background: COLORS.forest,
+                height: "100%",
+                width: `${pct}%`,
+                transition: "width 0.3s",
+              }}
+            />
+          </div>
+          <p className="text-xs mt-2" style={{ color: COLORS.inkSoft }}>
+            {pct.toFixed(1)}% дүүрсэн · дутуу {fmtSavings(remaining)}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-4">
+          <div
+            className="rounded-2xl p-3"
+            style={{ background: COLORS.cream, border: `1px solid ${COLORS.line}` }}
+          >
+            <p className="text-xs" style={{ color: COLORS.inkSoft }}>Өдрийн дундаж</p>
+            <p
+              className="text-base font-semibold mt-1"
+              style={{ fontFamily: "'Space Grotesk', sans-serif", color: COLORS.ink }}
+            >
+              {avgDaily > 0 ? fmtSavings(avgDaily) : "—"}
+            </p>
+          </div>
+          <div
+            className="rounded-2xl p-3"
+            style={{ background: COLORS.cream, border: `1px solid ${COLORS.line}` }}
+          >
+            <p className="text-xs" style={{ color: COLORS.inkSoft }}>Таамаг огноо</p>
+            <p
+              className="text-base font-semibold mt-1"
+              style={{ fontFamily: "'Space Grotesk', sans-serif", color: COLORS.ink }}
+            >
+              {projectedDate ? projectedDate.toLocaleDateString("mn-MN") : "—"}
+            </p>
+          </div>
+        </div>
+
+        <div
+          className="rounded-2xl p-4 mb-4"
+          style={{ background: COLORS.cream, border: `1px solid ${COLORS.line}` }}
+        >
+          <h3
+            className="text-sm font-semibold mb-3"
+            style={{ fontFamily: "'Space Grotesk', sans-serif", color: COLORS.ink }}
+          >
+            Хуримтлал нэмэх
+          </h3>
+          <div className="space-y-2">
+            <input
+              type="number"
+              placeholder="Дүн (жишээ: 45000)"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 text-sm"
+              style={{ background: COLORS.paper, border: `1px solid ${COLORS.line}`, color: COLORS.ink }}
+            />
+            <input
+              type="text"
+              placeholder="Тэмдэглэл (сонголтоор)"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              className="w-full rounded-lg px-3 py-2 text-sm"
+              style={{ background: COLORS.paper, border: `1px solid ${COLORS.line}`, color: COLORS.ink }}
+            />
+            {error && <p className="text-xs" style={{ color: COLORS.wine }}>{error}</p>}
+            <button
+              onClick={addEntry}
+              className="rounded-lg px-4 py-2 text-sm font-medium"
+              style={{ background: COLORS.forest, color: COLORS.cream }}
+            >
+              + Нэмэх
+            </button>
+          </div>
+        </div>
+
+        <div
+          className="rounded-2xl p-4"
+          style={{ background: COLORS.cream, border: `1px solid ${COLORS.line}` }}
+        >
+          <h3
+            className="text-sm font-semibold mb-3"
+            style={{ fontFamily: "'Space Grotesk', sans-serif", color: COLORS.ink }}
+          >
+            Түүх ({data.entries.length})
+          </h3>
+          {data.entries.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-6" style={{ color: COLORS.inkSoft }}>
+              <Inbox size={22} />
+              <p className="text-xs mt-2">Одоогоор бичлэг алга</p>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {data.entries.map((en) => (
+                <div
+                  key={en.id}
+                  className="flex items-center justify-between py-2"
+                  style={{ borderBottom: `1px solid ${COLORS.line}` }}
+                >
+                  <div>
+                    <p className="text-sm" style={{ color: COLORS.ink }}>{en.note}</p>
+                    <p className="text-xs" style={{ color: COLORS.inkSoft }}>
+                      {new Date(en.date).toLocaleDateString("mn-MN")}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm font-medium" style={{ color: COLORS.forest }}>
+                      +{fmtSavings(en.amount)}
+                    </span>
+                    <button
+                      onClick={() => removeEntry(en.id)}
+                      aria-label="Устгах"
+                      style={{ color: COLORS.wine }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ---------- Settings modal ----------
 function SettingsModal({ firebaseConfig, onClose, onDisconnect }) {
@@ -926,6 +1271,8 @@ function SettingsModal({ firebaseConfig, onClose, onDisconnect }) {
 // ---------- Main App ----------
 export default function DebtTracker() {
   const [unlocked, setUnlocked] = useState(false);
+  const [view, setView] = useState("debts"); // "debts" | "savings"
+  const [savingsUnlocked, setSavingsUnlocked] = useState(false);
   const [firebaseConfig, setFirebaseConfig] = useState(() => getConfig());
   const [showSettings, setShowSettings] = useState(false);
   const [entries, setEntries] = useState([]);
@@ -1067,6 +1414,20 @@ export default function DebtTracker() {
     return <PinLock onUnlock={() => setUnlocked(true)} />;
   }
 
+  if (view === "savings") {
+    if (!savingsUnlocked) {
+      return (
+        <PinLock
+          pin={SAVINGS_PIN}
+          title="Хадгаламж"
+          subtitle="Хадгаламжийн кодоо оруулна уу"
+          onUnlock={() => setSavingsUnlocked(true)}
+        />
+      );
+    }
+    return <SavingsSection onBack={() => setView("debts")} />;
+  }
+
   if (!firebaseConfig) {
     return <FirebaseSetup onConfigured={(cfg) => setFirebaseConfig(cfg)} />;
   }
@@ -1109,14 +1470,24 @@ export default function DebtTracker() {
               Энхжингийн зээл, төлбөрийн хуанли
             </h1>
           </div>
-          <button
-            onClick={() => setShowSettings(true)}
-            aria-label="Тохиргоо"
-            className="rounded-full p-2 shrink-0 mt-1"
-            style={{ background: COLORS.cream, border: `1px solid ${COLORS.line}`, color: COLORS.inkSoft }}
-          >
-            <Settings size={16} />
-          </button>
+          <div className="flex items-center gap-2 mt-1 shrink-0">
+            <button
+              onClick={() => setView("savings")}
+              aria-label="Хадгаламж"
+              className="rounded-full p-2"
+              style={{ background: COLORS.cream, border: `1px solid ${COLORS.line}`, color: COLORS.inkSoft }}
+            >
+              <PiggyBank size={16} />
+            </button>
+            <button
+              onClick={() => setShowSettings(true)}
+              aria-label="Тохиргоо"
+              className="rounded-full p-2"
+              style={{ background: COLORS.cream, border: `1px solid ${COLORS.line}`, color: COLORS.inkSoft }}
+            >
+              <Settings size={16} />
+            </button>
+          </div>
         </header>
 
         <div className="flex items-center justify-between mb-3">
